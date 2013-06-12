@@ -27,6 +27,8 @@ module.exports = class Snockets
     @updateDirectives filePath, flags, (err, graphChanged) =>
       if err
         if callback then return callback err else throw err
+
+      @depCacheValid = true
       callback? null, @depGraph, graphChanged
       @depGraph
 
@@ -43,6 +45,8 @@ module.exports = class Snockets
         chain = @depGraph.getChain filePath
       catch e
         if callback then return callback e else throw e
+
+      @depCacheValid = true
 
       compiledChain = for link in chain.concat filePath
         o = {}
@@ -63,19 +67,22 @@ module.exports = class Snockets
     flags.async ?= @options.async
     concatenationChanged = true
 
-    @updateDirectives filePath, flags, (err, graphChanged) =>
-      if err
-        if callback then return callback err else throw err
+    compile = =>
       try
         if @concatCache[filePath]?.data
           concatenation = @concatCache[filePath].data.toString 'utf8'
           if !flags.minify then concatenationChanged = false
         else
           chain = @depGraph.getChain filePath
-          concatenation = (for link in chain.concat filePath
-            @compileFile link
-            @cache[link].js.toString 'utf8'
-          ).join '\n'
+
+          concatenation = ""
+          for link in chain.concat filePath
+            cached = @cache[link]
+            if cached.mtime isnt cached.lastmtime
+              @compileFile link
+              cached.lastmtime = cached.mtime
+            concatenation += cached.js.toString('utf8') + "\n"
+
           @concatCache[filePath] = data: new Buffer(concatenation)
       catch e
         if callback then return callback e else throw e
@@ -93,12 +100,26 @@ module.exports = class Snockets
       callback? null, result, concatenationChanged
       result
 
+    @updateDirectives filePath, flags, (err, graphChanged) ->
+      if err
+        if callback then return callback err else throw err
+
+      @depCacheValid = true
+      compile()
+
+  invalidateDepCache: ->
+    @depCacheValid = false
+
+
   # ## Internal methods
 
   # Interprets the directives from the given file to update `@depGraph`.
   updateDirectives: (filePath, flags, excludes..., callback) ->
     return callback() if filePath in excludes
     excludes.push filePath
+
+    if @depCacheValid
+      return callback() if @depGraph.map[filePath]
 
     depList = []
     graphChanged = false
@@ -214,12 +235,12 @@ module.exports = class Snockets
       if flags.async
           fs.readFile @absPath(filePath), (err, data) =>
             return callback err if err
-            @cache[filePath] = {mtime: stats.mtime, data}
+            @cache[filePath] = {mtime: stats.mtime, modified: true, data}
             callback null, true
       else
         try
           data = fs.readFileSync @absPath(filePath)
-          @cache[filePath] = {mtime: stats.mtime, data}
+          @cache[filePath] = {mtime: stats.mtime, modified: true, data}
           callback null, true
         catch e
           callback e
@@ -229,9 +250,11 @@ module.exports = class Snockets
       @cache[filePath].js = @cache[filePath].data
       false
     else
-      src = @cache[filePath].data.toString 'utf8'
-      js = compilers[ext[1..]].compileSync @absPath(filePath), src
-      @cache[filePath].js = new Buffer(js)
+      if @cache[filePath].modified? and @cache[filePath].modified
+        src = @cache[filePath].data.toString 'utf8'
+        js = compilers[ext[1..]].compileSync @absPath(filePath), src
+        @cache[filePath].js = new Buffer(js)
+      else
       true
 
   absPath: (relPath) ->
