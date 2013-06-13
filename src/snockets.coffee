@@ -82,6 +82,7 @@ module.exports = class Snockets
               @compileFile link
               cached.lastmtime = cached.mtime
             concatenation += cached.js.toString('utf8') + "\n"
+          concatenation = concatenation[0...-1]
 
           @concatCache[filePath] = data: new Buffer(concatenation)
       catch e
@@ -108,6 +109,7 @@ module.exports = class Snockets
       compile()
 
   invalidateDepCache: ->
+    @depGraph.map = {}
     @depCacheValid = false
 
 
