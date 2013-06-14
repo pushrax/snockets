@@ -77,11 +77,8 @@ module.exports = class Snockets
 
           concatenation = ""
           for link in chain.concat filePath
-            cached = @cache[link]
-            if cached.mtime isnt cached.lastmtime
-              @compileFile link
-              cached.lastmtime = cached.mtime
-            concatenation += cached.js.toString('utf8') + "\n"
+            @compileFile link
+            concatenation += @cache[link].js.toString('utf8') + "\n"
           concatenation = concatenation[0...-1]
 
           @concatCache[filePath] = data: new Buffer(concatenation)
@@ -237,12 +234,12 @@ module.exports = class Snockets
       if flags.async
           fs.readFile @absPath(filePath), (err, data) =>
             return callback err if err
-            @cache[filePath] = {mtime: stats.mtime, modified: true, data}
+            @cache[filePath] = {mtime: stats.mtime, valid: false, data}
             callback null, true
       else
         try
           data = fs.readFileSync @absPath(filePath)
-          @cache[filePath] = {mtime: stats.mtime, modified: true, data}
+          @cache[filePath] = {mtime: stats.mtime, valid: false, data}
           callback null, true
         catch e
           callback e
@@ -252,11 +249,11 @@ module.exports = class Snockets
       @cache[filePath].js = @cache[filePath].data
       false
     else
-      if @cache[filePath].modified? and @cache[filePath].modified
+      unless @cache[filePath].valid
         src = @cache[filePath].data.toString 'utf8'
         js = compilers[ext[1..]].compileSync @absPath(filePath), src
         @cache[filePath].js = new Buffer(js)
-      else
+        @cache[filePath].valid = true
       true
 
   absPath: (relPath) ->
